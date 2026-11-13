@@ -63,13 +63,13 @@ qubit-quest/
 
 ## Guardrails
 
-Instructions in CLAUDE.md are guidance that Claude Code usually follows, not rules it is forced to follow. Anything that must hold every time is therefore enforced by tooling, and M0 sets all of it up.
+Instructions in CLAUDE.md are guidance that Claude Code usually follows, not rules it is forced to follow. Anything that must hold every time is therefore enforced by tooling. M0 sets up everything here except the fixture-regeneration job, which arrives in M1 with the first generator.
 
 | Rule | Enforced by |
 | --- | --- |
 | Nothing is committed unless `pnpm verify` passes | Git pre-commit hook; a permission rule that denies commits which skip hooks; CI on every push |
-| Answer-key fixtures are never edited by hand | Permission rule that denies edits under `fixtures/golden`; a CI job that regenerates the deterministic fixtures and fails on any difference |
-| Engines stay pure: no UI imports, no `Math.random`, no `Date` | Lint rules scoped to `src/engine` |
+| Answer-key fixtures are never edited by hand | Permission rule that denies edits under `fixtures/golden`; a checksum manifest checked by pnpm verify; from M1, a CI job that regenerates the deterministic fixtures and fails on any difference |
+| Engines stay pure: no UI imports, no `Math.random`, no `Date` | Lint rules and a DOM-free TypeScript config scoped to `src/engine` |
 | Tests are not skipped or narrowed | Lint errors on `.skip`, `.only` and `.todo`; the review prompt reads the test diff |
 | Every level is solvable, and not solved by an empty circuit | `tools/validate-levels`, part of `pnpm verify` |
 | Every level plays through in a real browser | The solve-bot in the Playwright suite, run in CI |
@@ -153,15 +153,15 @@ Build:
 1. A Vite + React + TypeScript app managed by pnpm. TypeScript strict mode plus noUncheckedIndexedAccess. ESLint, Prettier, Vitest, Playwright. Use current stable versions and commit the lockfile.
 2. Folders: src/engine, src/game, src/ui, src/levels, src/i18n, fixtures/golden, tools/fixtures, tools/validate-levels, e2e, docs/review.
 3. Scripts: dev, test, test:e2e, validate:levels (a stub that passes with zero levels), fixtures (a stub that prints usage), and verify = typecheck, then lint, then unit tests, then validate:levels, then production build. verify must exit non-zero if any step fails.
-4. Lint rules: files under src/engine may not import react or anything from src/ui or src/game, and may not use Math.random or Date. Skipped or focused tests (.skip, .only, .todo) are lint errors.
+4. Lint rules: files under src/engine may import only from inside src/engine and no packages (engine test files may also import vitest and files under fixtures/golden), and may not use Math.random, Date or the DOM (give src/engine its own TypeScript config without the DOM library). Resolve import paths before checking them, so that ./../ui is caught. Skipped or focused tests in any form (.skip, .only, .todo, skipIf, xit, fit, and nested forms such as test.describe.only) are lint errors everywhere in the repository. Test the lint rules through ESLint's Node API with virtual file paths; do not add fixture folders that lint or Vitest ignore.
 5. src/engine/rng.ts: a seeded generator with nextUint32(), nextFloat() in [0, 1), and fork(label), which derives an independent child stream.
-6. Guardrails: a Git pre-commit hook (through core.hooksPath, no extra dependency) that runs pnpm verify. A GitHub Actions workflow that runs pnpm verify and the Playwright tests on every push. Claude Code permission rules in .claude/settings.json that deny editing files under fixtures/golden and deny commits that skip hooks. Read the current Claude Code settings documentation for the exact format; do not guess it.
+6. Guardrails: a Git pre-commit hook (through core.hooksPath, no extra dependency) that runs pnpm verify. A GitHub Actions workflow that runs pnpm verify and the Playwright tests on every push. Claude Code permission rules in .claude/settings.json that deny editing files under fixtures/golden and deny commits that skip hooks. Read the current Claude Code settings documentation for the exact format; do not guess it. Confirm each permission rule by attempting the denied action, and record the result. Add a step to verify that checks every file under fixtures/golden against its SHA-256 in fixtures/golden/MANIFEST.json (it passes while the folder is empty).
 7. docs/PROGRESS.md with a status table for M0 to M14.
 8. A home screen that shows the game title, and one Playwright test that loads it.
 
 Tests first:
-- rng: the same seed gives the same first 1,000 values; two different seeds differ; fork("a") is reproducible and differs from fork("b"); the mean of 100,000 nextFloat() values is within 0.005 of 0.5.
-- lint: a sample file that uses Math.random inside src/engine fails the engine lint rule (keep it as a test of the rule, outside the normal lint run).
+- rng: the same seed gives the same first 1,000 values; two different seeds differ; fork("a") is reproducible and differs from fork("b"); the mean of 100,000 nextFloat() values is within 0.005 of 0.5; the first 8 nextUint32() values and the first 8 nextFloat() values of a generator seeded with 42, and the first 8 nextUint32() values of its fork("a"), equal hard-coded literals, so that any change to the algorithm, the seeding or the fork hash fails a test.
+- lint, through ESLint's Node API: engine code using Math.random, Date or document fails; an engine import of ../ui, ./../ui, ../engine/../ui, src/ui or @/ui fails; each banned test form fails in src/engine, src/game, src/ui, tools and e2e.
 
 Out of scope: any game logic.
 
@@ -181,7 +181,7 @@ Build in src/engine/statevector:
 3. measure(qubit, rng) collapses and renormalises. probabilities() is exact. sample(shots, rng) does not collapse. reducedBloch(qubit) returns (x, y, z).
 4. fidelity(a, b) = |<a|b>|^2 and equalUpToGlobalPhase(a, b).
 5. A Circuit type (columns of operations) and run(circuit, rng), which returns the state after every column. The UI will animate these.
-6. tools/fixtures/gen_statevector.py: uses Qiskit to write fixtures/golden/statevector/*.json. 200 random circuits on 1 to 6 qubits from the gate set above, generated from a fixed seed, with final amplitudes converted to our qubit order and rounded to 12 decimals. Pin package versions in tools/fixtures/requirements.txt. Wire it into pnpm fixtures.
+6. tools/fixtures/gen_statevector.py: uses Qiskit to write one file, fixtures/golden/statevector.json, holding 200 random circuits on 1 to 6 qubits from the gate set above. Tests import it as plain JSON; do not use import.meta.glob or add vite/client types to the engine config. Later generators follow the same layout, one JSON file per fixture set. The circuits are generated from a fixed seed, with final amplitudes converted to our qubit order and rounded to 12 decimals. Pin package versions in tools/fixtures/requirements.txt. Wire it into pnpm fixtures. The generator also writes fixtures/golden/MANIFEST.json. Add a CI job that installs the pinned Python packages, regenerates the fixtures and fails if anything under fixtures/golden differs from what is committed.
 
 Tests first:
 - H|0> = (|0> + |1>)/sqrt(2). HH = I. HZH = X. S.S = Z. T.T = S.
