@@ -52,7 +52,8 @@ Branch `m00-scaffold`.
 | `.skip`, `.only`, `.todo` are lint errors                          | `eslint-rules.test.ts`: "rejects test-{skip,only,todo}.test.ts"                         |
 | Home screen loads with the title                                   | `e2e/home.spec.ts`                                                                       |
 | `pnpm verify` passes                                               | Run locally, exit 0                                                                      |
-| A failing test makes `pnpm verify` exit non-zero and blocks a commit | Shown in the session: exit 1, and the hook refused the commit. The test was then removed. |
+| A failing test makes `pnpm verify` exit non-zero and blocks a commit | Shown in the session: `src/engine/deliberate-failure.test.ts` gave `verify` exit 1, and `git commit` exited 1 with no new commit. The test was then removed and `verify` returned exit 0. |
+| Commits that skip hooks are denied to Claude Code                  | Shown in the session: `git commit --no-verify …` and `git commit -n …` were both refused by `.claude/settings.json`. The `fixtures/golden` Edit deny rule was not exercised live. |
 
 ### Decisions
 
