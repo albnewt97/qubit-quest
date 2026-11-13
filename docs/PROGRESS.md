@@ -186,7 +186,7 @@ Branch `m00-scaffold`. No changes to `rng.ts`. The remaining findings of the sec
 
 ## M1. State-vector engine
 
-Branch `m01-statevector`, from `m00-scaffold` (M0 is not merged into `main` yet).
+Branch `m01-statevector`, from `m00-scaffold` at 9a4aa3a. M0 is merged into `main` (`origin/main` is at 9a4aa3a), so this branch sits directly on `main`.
 
 ### What was done
 
@@ -281,6 +281,26 @@ Branch `m01-statevector`, from `m00-scaffold` (M0 is not merged into `main` yet)
 - **`pip install` in CI uses exact pins but no hashes** (`--require-hashes` is not used), so it trusts PyPI to serve the pinned versions.
 - **The CI check is now by value, so a hand edit to a fixture smaller than 1e-10 would pass `compare:fixtures`.** `check:fixtures` still catches any byte change, unless `MANIFEST.json` is edited along with it. The permission rule and review are the other protections. This narrows the M0 known limit; it does not close it.
 - **The Python generator has no unit tests of its own.** It is checked through its self-check, the coverage check, the golden test and the CI comparison.
+
+From the independent M1 review (L1 to L8, all logged, none blocking):
+
+- **L1. The CI fixture comparison allows 1e-10, not an exact match** (`tools/check-fixtures/compare.ts:46-50`). This is the owner's change A, confirmed after the review. The tolerance also covers circuit inputs (angles and unitary entries), which numpy PCG64 draws bit-identically on every platform and so could be compared exactly.
+- **L2. Unexpected or misspelt op fields are accepted silently** (`src/engine/statevector/circuit.ts:117`, `:155`). A `measure` with `controls` passes `validateCircuit` and runs as an unconditional measurement, and `opQubits` leaves those controls out of the column-overlap check. A typo such as `control: [0]` for `controls` turns CNOT into a plain X. **Scheduled for M2.**
+- **L3. A state's amplitude arrays are mutable from outside** (`src/engine/statevector/state.ts:36-38`). `readonly` covers only the reference, so the snapshots `run` returns can be changed (`circuit.test.ts:59` does so on purpose). If a caller breaks the normalisation, `measure` divides by zero and fills the state with NaN with no error (`state.ts:190`).
+- **L4. Error branches with no test:**
+  - `circuit.ts:125`: `controls` that is not an array.
+  - `circuit.ts:150`: no test reaches this branch (`swap(1,1)` and `swap(0,2)` are rejected by other checks first; a swap with controls or three targets is never tried).
+  - `circuit.ts:143`: a unitary with a missing or null matrix.
+  - `circuit.ts:173`, `:176`: columns that are not arrays.
+  - `run.ts:40`: a measure with no Rng.
+  - `matrix.ts:76`: an unknown gate name in `gateMatrix`.
+  - `matrix.ts:151-155`: `isUnitary` on a matrix of the wrong shape.
+  - `state.ts:76`: `fromAmplitudes` with more than 12 qubits or with NaN amplitudes.
+  - `state.ts:208`: a shot count above 2³²−1.
+- **L5. One measurement test can hang instead of failing** (`measure.test.ts:56-58`). It repeats a measurement until it gets outcome 1, so if `measure` always returned 0 the test would run until Vitest's time limit rather than fail with a clear message.
+- **L6. `reducedBloch` is lightly tested** (`state.test.ts:96-118`): only product states, the Bell pair, |+⟩ and |+i⟩. No test covers a partially entangled state with complex amplitudes (arrow length between 0 and 1), and the sign of y is pinned only by the one-qubit |+i⟩ case. The code is correct; this is coverage only.
+- **L7. A stray file under `fixtures/golden` would be approved automatically** (`tools/fixtures/fixturelib.py:71`). `write_manifest` hashes every file in the output folder, so `pnpm fixtures` run in place adds a stale or stray file to `MANIFEST.json`. The CI comparison still catches it, as "only in the committed fixtures".
+- **L8. This section said M0 was not merged into `main`.** It is (`origin/main` at 9a4aa3a); corrected above.
 
 ### Skipped or uncertain
 
