@@ -54,6 +54,31 @@ describe("createRng", () => {
   );
 });
 
+// Pinned output of the generator.
+// DO NOT EDIT THESE VALUES. Changing them means the generator changed, and that
+// breaks every seeded replay (levels, noise runs, saved games, tests). Any change
+// here needs explicit approval from the project owner.
+describe("pinned output", () => {
+  it("createRng(42) gives these first 8 nextUint32 values", () => {
+    expect(takeUint32(createRng(42), 8)).toEqual([
+      1698727302, 3649385686, 112526994, 3714933728, 3936889994, 2679883055, 3912139601, 3370662020,
+    ]);
+  });
+
+  it('createRng(42).fork("a") gives these first 8 nextUint32 values', () => {
+    expect(takeUint32(createRng(42).fork("a"), 8)).toEqual([
+      1619282167, 1826484909, 1857931055, 1064995702, 2106292376, 939643085, 1629950590, 4193247404,
+    ]);
+  });
+
+  it("createRng(42) gives these first 8 nextFloat values", () => {
+    expect(takeFloat(createRng(42), 8)).toEqual([
+      0.3955157760507525, 0.026199734694886234, 0.9166286336180485, 0.9108659832536683,
+      0.23106236871075192, 0.10200081006144301, 0.9124532034875158, 0.0028833112297139696,
+    ]);
+  });
+});
+
 describe("fork", () => {
   it('is reproducible: fork("a") from equal parents gives equal streams', () => {
     const a1 = createRng(99).fork("a");

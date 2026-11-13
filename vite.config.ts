@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   test: {
     include: ["src/**/*.test.{ts,tsx}", "tools/**/*.test.ts"],
-    exclude: ["**/node_modules/**", "**/__lint-fixtures__/**", "e2e/**"],
+    exclude: ["**/node_modules/**", "e2e/**"],
     environment: "node",
   },
 });

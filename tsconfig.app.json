@@ -22,5 +22,7 @@
     "noUncheckedSideEffectImports": true,
     "erasableSyntaxOnly": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // src/engine has its own project without the DOM (tsconfig.engine.json).
+  "exclude": ["src/engine"]
 }

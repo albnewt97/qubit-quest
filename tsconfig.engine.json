@@ -1,0 +1,28 @@
+{
+  // src/engine is pure TypeScript: ES library only, so no DOM, no worker and no
+  // Node types. The simulation worker lives outside src/engine. resolveJsonModule
+  // lets engine tests import answer keys from fixtures/golden.
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.engine.tsbuildinfo",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "types": [],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "skipLibCheck": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "erasableSyntaxOnly": true
+  },
+  "include": ["src/engine"]
+}

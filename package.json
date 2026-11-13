@@ -20,7 +20,8 @@
     "test:e2e": "playwright test",
     "validate:levels": "tsx tools/validate-levels/index.ts",
     "fixtures": "python3 tools/fixtures/generate.py",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm validate:levels && pnpm build"
+    "check:fixtures": "tsx tools/check-fixtures/index.ts",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm validate:levels && pnpm check:fixtures && pnpm build"
   },
   "dependencies": {
     "react": "19.3.1",

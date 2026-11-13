@@ -5,29 +5,20 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import { defineConfig, globalIgnores } from "eslint/config";
 import globals from "globals";
 import tseslint from "typescript-eslint";
+import local from "./tools/lint/engine-imports.js";
 
 // ---------------------------------------------------------------------------
-// Engine purity: src/engine is pure TypeScript. No React, no UI or game imports,
-// no Math.random, no Date. Randomness comes from the Rng passed in.
+// Engine purity: src/engine is pure TypeScript. Imports only from inside
+// src/engine and no packages; no Math.random, no Date, no DOM or other host
+// globals. Randomness comes from the Rng passed in. Engine tests may also import
+// vitest and answer keys under fixtures/golden.
 // ---------------------------------------------------------------------------
 const ENGINE_MSG = "src/engine must stay pure (see CLAUDE.md).";
 
-const engineRestrictedImports = [
+const engineImports = ["error", { allowedDirs: ["src/engine"], allowedPackages: [] }];
+const engineTestImports = [
   "error",
-  {
-    paths: [
-      { name: "react", message: `${ENGINE_MSG} No React.` },
-      { name: "react-dom", message: `${ENGINE_MSG} No React.` },
-    ],
-    patterns: [
-      { group: ["react/*", "react-dom/*"], message: `${ENGINE_MSG} No React.` },
-      {
-        // Relative paths that climb into src/ui or src/game, or root/alias paths to them.
-        regex: String.raw`^(\.\./)+(ui|game)([/.]|$)|(^|/)src/(ui|game)([/.]|$)|^@/(ui|game)([/.]|$)`,
-        message: `${ENGINE_MSG} The engine may not import from src/ui or src/game.`,
-      },
-    ],
-  },
+  { allowedDirs: ["src/engine", "fixtures/golden"], allowedPackages: ["vitest"] },
 ];
 
 const engineRestrictedSyntax = [
@@ -61,15 +52,17 @@ const TEST_MSG = "Skipped, focused or todo tests are not allowed (see CLAUDE.md)
 const TEST_OBJECTS = "/^(describe|suite|it|test|bench)$/";
 const TEST_MODIFIERS = "/^(only|skip|todo|fixme|skipIf|runIf)$/";
 
+// A modifier on a test object or on a member up to two levels below it, with dot
+// or string access:
+// it.skip, test["only"], test.describe.only, it.concurrent.only,
+// test.describe.parallel.only, it.skip.each ...
 const testRestrictedSyntax = [
   {
-    // it.skip, test.only, describe.todo, test.fixme ...
-    selector: `MemberExpression[object.name=${TEST_OBJECTS}][property.name=${TEST_MODIFIERS}]`,
-    message: TEST_MSG,
-  },
-  {
-    // test.describe.only, it.concurrent.skip ...
-    selector: `MemberExpression[object.type='MemberExpression'][object.object.name=${TEST_OBJECTS}][property.name=${TEST_MODIFIERS}]`,
+    selector: [
+      "MemberExpression",
+      `:matches([property.name=${TEST_MODIFIERS}], [property.value=${TEST_MODIFIERS}])`,
+      `:matches([object.name=${TEST_OBJECTS}], [object.object.name=${TEST_OBJECTS}], [object.object.object.name=${TEST_OBJECTS}])`,
+    ].join(""),
     message: TEST_MSG,
   },
 ];
@@ -83,14 +76,7 @@ const ENGINE_FILES = ["src/engine/**/*.{ts,tsx}"];
 const TEST_FILES = ["**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}", "e2e/**/*.{ts,tsx}"];
 
 export default defineConfig([
-  globalIgnores([
-    "dist",
-    "coverage",
-    "playwright-report",
-    "test-results",
-    // Lint-rule samples that must fail; linted only by tools/lint/eslint-rules.test.ts.
-    "**/__lint-fixtures__/**",
-  ]),
+  globalIgnores(["dist", "coverage", "playwright-report", "test-results"]),
 
   {
     files: ["**/*.{ts,tsx}"],
@@ -109,7 +95,9 @@ export default defineConfig([
     languageOptions: { globals: globals.node },
   },
   {
+    // Not src/engine: it gets ES globals only (see the engine block below).
     files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/engine/**"],
     languageOptions: { globals: globals.browser },
   },
   {
@@ -123,8 +111,12 @@ export default defineConfig([
 
   {
     files: ENGINE_FILES,
+    plugins: { local },
     rules: {
-      "no-restricted-imports": engineRestrictedImports,
+      "local/engine-imports": engineImports,
+      // typescript-eslint turns no-undef off for TS. In the engine it is the lint
+      // guard against DOM and host globals; tsconfig.engine.json is the other.
+      "no-undef": "error",
       "no-restricted-properties": engineRestrictedProperties,
       "no-restricted-globals": ["error", ...engineRestrictedGlobals],
       "no-restricted-syntax": ["error", ...engineRestrictedSyntax],
@@ -140,7 +132,9 @@ export default defineConfig([
   {
     // Engine tests get both sets: flat config replaces (not merges) a rule's options.
     files: ENGINE_FILES.map((g) => g.replace("*.{ts,tsx}", "*.{test,spec}.{ts,tsx}")),
+    plugins: { local },
     rules: {
+      "local/engine-imports": engineTestImports,
       "no-restricted-globals": ["error", ...engineRestrictedGlobals, ...testRestrictedGlobals],
       "no-restricted-syntax": ["error", ...engineRestrictedSyntax, ...testRestrictedSyntax],
     },
