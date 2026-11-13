@@ -5,7 +5,7 @@ Status of each milestone in docs/BUILD_PLAN.md. Each session reads this file fir
 | #   | Milestone                              | Status      | Proof it works                                                       |
 | --- | -------------------------------------- | ----------- | -------------------------------------------------------------------- |
 | M0  | Scaffold and guardrails                | Done        | A deliberately broken test blocks a commit (see M0 below)            |
-| M1  | State-vector engine                    | Not started | 200 Qiskit fixtures match to 1 − 1e−9                                 |
+| M1  | State-vector engine                    | Done        | 200 Qiskit fixtures match to 1 − 1e−9 (see M1 below)                  |
 | M2  | Circuit builder                        | Not started | Browser test builds a Bell pair both ways                            |
 | M3  | State views                            | Not started | View tests on 5 reference states                                     |
 | M4  | Level system                           | Not started | Validator rejects 3 broken levels; solve-bot clears all 8            |
@@ -183,3 +183,106 @@ Branch `m00-scaffold`. No changes to `rng.ts`. The remaining findings of the sec
 
 - A Vitest snapshot file (`__snapshots__/x.test.ts.snap`) matches `*.test.*` and is not a test file, so the coverage test would flag it. No snapshots exist. If they are adopted, the test needs an exemption for `__snapshots__`, which needs the owner's approval.
 - Skipped Playwright tests are not caught at run time (see Known limits).
+
+## M1. State-vector engine
+
+Branch `m01-statevector`, from `m00-scaffold` (M0 is not merged into `main` yet).
+
+### What was done
+
+- **Engine, `src/engine/statevector/`** (pure TypeScript; every file under 300 lines):
+  - `state.ts`: the `StateVector` class, 1 to 12 qubits, with real and imaginary parts in two Float64Arrays. Constructors `zero`, `basis` and `fromAmplitudes` (which copies its input and checks the length and that the norm is 1 within 1e-9). Methods `applyMatrix1(m, target, controls)` (any one-qubit matrix with any number of controls), `applySwap`, `measure(q, rng)` (collapses and renormalises), `probabilities()` (exact), `sample(shots, rng)` (no collapse; a `Uint32Array` of counts per basis index), `reducedBloch(q)` (returns `{x, y, z}`), `norm()` and `clone()`.
+  - `matrix.ts`: the `Matrix2` type (row-major `[m00, m01, m10, m11]`), the matrices of I, X, Y, Z, H, S, S†, T, T†, Rx, Ry and Rz (Qiskit convention, `R_P(θ) = exp(−iθP/2)`), plus `dagger`, `multiply`, `withPhase`, `isUnitary` and `INVERSE_GATE`.
+  - `compare.ts`: `inner`, `fidelity = |<a|b>|²`, and `equalUpToGlobalPhase` (fidelity ≥ 1 − 1e-9 by default).
+  - `circuit.ts`:
+    - The `Circuit` type (`{ qubits, columns: Op[][] }`). `Op` is one of: `gate` (a named gate with optional `controls` and `theta`), `unitary` (any 2×2 unitary with optional `controls`), `swap` and `measure`.
+    - CNOT, CZ and Toffoli are `x` or `z` with one or two controls. The helpers `cnot`, `cz`, `toffoli`, `swap`, `gate`, `controlled`, `unitary` and `measure` build them.
+    - `validateCircuit` checks qubit counts, qubits in range, no repeats within an op, disjoint ops within a column, angles, unitarity, and unknown gates or kinds. Errors name the column and op.
+    - `inverse` reverses the columns and inverts each op, and refuses a circuit with a measurement.
+  - `run.ts`: `run(circuit, rng, initial?)` returns `{ states, measurements }`.
+    - `states[0]` is the starting state and `states[j + 1]` the state after column j, so `states.length = columns + 1`. Each entry is its own copy.
+    - `measurements` lists `{column, qubit, outcome}`. Nothing is conditioned on outcomes (classical control is out of scope).
+  - `random.ts`: seeded `randomOp`, `randomCircuit` (optionally with measurements), `randomUnitary` and `randomState`, used by the property tests.
+  - `index.ts`: barrel export. `test-support.ts` holds the test helpers (the checked `at`, `matrixOf`, `maxAmplitudeDiff`).
+- **Answer keys, `tools/fixtures/`:**
+  - `gen_statevector.py` writes `fixtures/golden/statevector.json`.
+    - 200 circuits, with circuit i on `1 + i mod 6` qubits and 1 to 15 columns, from seed 20261114 (numpy PCG64).
+    - They are written in the engine's `Circuit` format, so the test feeds them straight to `run`.
+    - Final states come from `qiskit.quantum_info.Statevector`. They are converted to our qubit order by bit-reversing each index (the only conversion), rounded to 12 decimals, with −0.0 written as 0.0.
+    - Angles and unitary entries are written at full precision, so JSON gives JavaScript the exact float64 Qiskit used.
+    - One circuit per line, no timestamps.
+  - **Self-check (owner's change B).** For every op, controlled or not, Qiskit's `Operator` for the gate is compared with the matrix built directly from our definition: identity unless every control is 1, then the 2×2 matrix on the target. The comparison includes phase, to 1e-12. On any mismatch the generator stops before writing.
+  - **Coverage check.** The generator stops if the seed fails to cover every named gate with and without controls, a unitary with and without controls, CX, CZ, CCX, SWAP and an op with 3 controls.
+  - `fixturelib.py`:
+    - `check_pins()`: the generators stop unless every package in `requirements.txt` is installed at exactly its pinned version.
+    - `write_manifest()`: writes `MANIFEST.json`. Its `meta` holds the generator and the pins, but not the Python patch version.
+  - `generate.py` is the `pnpm fixtures` entry point. It runs each generator in `GENERATORS`, then writes the manifest. `--out <dir>` writes elsewhere (change A). `gen_statevector.py` run on its own also writes the manifest.
+  - `requirements.txt`: the full `pip freeze` of a clean Python 3.11 venv after installing the latest qiskit and numpy: qiskit 2.6.2, numpy 2.4.6, scipy 1.17.1, rustworkx 0.18.1, dill 0.4.1, stevedore 5.10.0, typing-extensions 4.16.0.
+- **CI compare by value (change A).**
+  - `tools/check-fixtures/compare.ts`, run as `pnpm compare:fixtures <dir>`. The two folders must hold the same set of files. In JSON files, structure, strings, booleans and integers must match exactly, and other numbers within 1e-10. `MANIFEST.json` is compared by its file list and `meta`, not by its hashes. Any other file is compared byte for byte.
+  - The new `fixtures` job in `.github/workflows/ci.yml` does this, in order:
+    1. Installs the pins on Python 3.11.
+    2. Runs `pnpm fixtures --out "$RUNNER_TEMP/golden-regenerated"`.
+    3. Runs `pnpm compare:fixtures` on that folder.
+    4. Checks that `git status` shows nothing under `fixtures/golden`.
+  - CI never writes the committed files or `MANIFEST.json`.
+- `.gitignore`: `__pycache__/`.
+
+### Acceptance checks
+
+| Check | Proved by |
+| ----- | --------- |
+| H\|0⟩ = (\|0⟩ + \|1⟩)/√2 | `gates.test.ts`: "H\|0> = (\|0> + \|1>)/sqrt(2)" |
+| HH = I, HZH = X, S·S = Z, T·T = S | `gates.test.ts`: "HH = I", "HZH = X", "S.S = Z", "T.T = S". Each compares the full 2×2 matrix the engine applies with a literal matrix to 1e-12, phase included. |
+| Rotation convention as in Qiskit | `gates.test.ts`: "Rz(θ) = diag(e^(-i θ/2), e^(i θ/2))", plus the same for Rx and Ry, at 7 angles each. Also "%s matches its textbook matrix" for the 9 fixed gates. |
+| Bell pair from H(0), CNOT(0→1), with reducedBloch (0, 0, 0) on both qubits | `state.test.ts`: "H(0) then CNOT(0 -> 1) on \|00> gives (\|00> + \|11>)/sqrt(2), with zero Bloch vectors" |
+| CNOT(0→1): \|10⟩ → \|11⟩ and \|01⟩ → \|01⟩ | `state.test.ts`: "CNOT(0 -> 1) on \|10> gives \|11>" and "CNOT(0 -> 1) on \|01> gives \|01>" |
+| On 3 qubits, X(0)\|000⟩ is index 4 and X(2)\|000⟩ is index 1 (owner's change C) | `state.test.ts`: "on 3 qubits, X on qubit 0 takes \|000> to index 4 and X on qubit 2 to index 1" |
+| Norm within 1e-12 of 1 after 1,000 random gates | `norm.test.ts`: "stays within 1e-12 of 1 after 1,000 random gates on %i qubit(s)", for 1, 3, 6 and 12 qubits. It also checks the state moved and that every op kind was used. |
+| measure on \|+⟩: 10,000 seeded trials within 4σ of 50/50, and the state afterwards is the measured basis state | `measure.test.ts`: "on \|+> gives 50/50 within 4 standard deviations over 10,000 trials, and collapses to the outcome" (\|ones − 5000\| ≤ 200, with each state after measurement checked) |
+| Same seed gives the same measurement record and the same states (owner's answer 3) | `circuit.test.ts`: "gives the same measurement record and the same states for the same seed". The circuit has 5 qubits and 40 columns with more than 5 measurements. States are compared exactly, and a different seed gives a different record. |
+| `run` returns the starting state and then one state per column (owner's answer 4) | `circuit.test.ts`: "returns the starting state at index 0, then one state per column", "gives an empty circuit just the starting state", "starts from a copy of the given state and never mutates it" and "keeps each snapshot independent of later columns". `golden.test.ts` also checks `states.length = columns + 1` on all 200 circuits. |
+| Every golden fixture matches with fidelity ≥ 1 − 1e-9 | `golden.test.ts`: "circuit %i matches with fidelity >= 1 - 1e-9", one test per circuit, 200 in all. Also "holds 200 circuits on 1 to 6 qubits with distinct ids" and "uses every gate in the set, with and without controls". |
+| Any random circuit followed by its inverse returns the starting state | `inverse.test.ts`: "returns the starting state after any random circuit, from \|0...0> and from random states". 100 circuits on 1–8 qubits with 20 columns each. The return must be exact within 1e-10 per amplitude, so global phase is included. A guard requires more than 90% of the circuits to move the state. |
+| Error paths | `circuit.test.ts` "validateCircuit": 18 malformed circuits, a non-unitary or NaN matrix, and the column/op in the message. `state.test.ts` "input validation". `compare.test.ts`. `gates.test.ts`: "rejects a rotation without a finite angle…". `inverse.test.ts`: "refuses a circuit that contains a measurement". |
+| CI comparison by value | `tools/check-fixtures/compare.test.ts` (13 tests): floats within 1e-10 pass and beyond it fail; integers, strings, booleans, array lengths and key sets are exact; a file on one side only fails; `MANIFEST.json` is compared without its hashes; invalid JSON fails; non-JSON files are compared by bytes. |
+| `pnpm verify` passes | Run in the session: exit 0, 550 unit tests (16 files). `pnpm test:e2e`: 1 passed. |
+
+### Shown in the session
+
+- **Tests first.** The 8 engine test files were written before any engine code and run: all 8 failed, because the modules did not exist (an import failure, not an assertion failure). `compare.test.ts` likewise failed before `compare.ts` existed. To show the tests catch real bugs, two deliberate faults were put in after the engine passed, then reverted:
+  - Rz with the opposite sign: 61 tests failed, 56 of them golden circuits plus the Rz convention tests.
+  - Qubit order reversed (`1 << qubit`): 155 failed, including all three qubit-order tests and 147 golden circuits.
+- **Regenerating locally gives byte-identical output.** Three runs of `pnpm fixtures` gave the same git object hashes: `statevector.json` c1dc273e…, `MANIFEST.json` 1deabac1…. A `--out` run into the scratchpad gave the same `statevector.json` SHA-256 that `MANIFEST.json` records (8835cbbd…). The CI steps were run locally as well: regenerate into a scratch folder, then `pnpm compare:fixtures` (exit 0), then `git status` under `fixtures/golden`.
+- **The compare script on altered copies** (each made in the scratchpad from a regenerated copy, never under `fixtures/golden`):
+  - One amplitude +1e-11: passes.
+  - One amplitude +1e-9: fails with `$.circuits[17].re[0]: … (differs by more than 1e-10)`.
+  - One `s` changed to `sdg`: fails with `$.circuits[1].columns[5][1].gate: "s" vs "sdg"`.
+  - One target changed: fails.
+- **The self-check stops the generator** (on a scratch copy of `tools/fixtures`):
+  - Using Qiskit's `PhaseGate` for `rz`, which equals Rz only up to a global phase: "Qiskit's operator for rz with 0 control(s) differs from our definition by 6.564e-01 … Not writing fixtures.", exit 1, nothing written.
+  - Negating U only in the controlled definition, a phase that matters only under control: stopped at "unitary with 1 control(s)", exit 1.
+- **The permission rule held.** A Bash command that read files under `fixtures/golden` with `cp` and `shasum` was refused. The fixtures were written only by `pnpm fixtures`, run with the venv's `python3` on `PATH`. No file under `fixtures/golden` was written or edited by hand.
+
+### Decisions
+
+- **Python environment:** a uv venv outside the repository (in the session scratchpad) on the local CPython 3.11.9. CI uses Python 3.11 to match. `pnpm fixtures` still calls `python3`, so put a venv with the pins first on `PATH`.
+- **Op model:** CNOT, CZ and Toffoli are `x` or `z` with controls rather than separate kinds, so one routine (`applyMatrix1`) serves every one-qubit and controlled gate, and the fixtures exercise it. `swap` takes no controls (Fredkin was not asked for). Controls are positive only (open controls were not asked for).
+- **Named gates are lower-case** (`h`, `sdg`, `rx` …), as in OpenQASM and Qiskit.
+- **`fromAmplitudes` requires norm 1 within 1e-9**, which admits the 12-decimal fixture amplitudes.
+- **`measure`** draws r = nextFloat() × (p0 + p1) and returns 0 if r < p0. So an outcome of probability zero is never returned, tested in "never returns an outcome of probability zero".
+- **`?? 0` in the hot loops of `state.ts` and `compare.ts`.** The lint config is `strictTypeChecked`, which bans `!`, and `noUncheckedIndexedAccess` types every typed-array read as `number | undefined`. Each of those reads is inside a loop bounded by the array length, so the fallback is unreachable; the file header says so. Tests use a checked `at()` that throws instead. The lint config was not changed.
+- **Integers in the compare script:** a number that is an integer in both files must match exactly; any other number may differ by 1e-10. The generator writes structural values (ids, qubit counts, targets, controls) as integers and amplitudes as floats, so structure is compared exactly. In JSON, 1.0 and 1 are the same value; the rule treats them alike.
+- **Fixture layout for later generators:** one JSON file per fixture set at the top of `fixtures/golden`, each written by a module with a `generate(out_dir)` function listed in `GENERATORS` in `tools/fixtures/generate.py`. Tests import the file as plain JSON. No `import.meta.glob`, and `tsconfig.engine.json` is unchanged.
+
+### Known limits
+
+- **The CI `fixtures` job has not run on GitHub** (nothing is pushed). It has only been run locally in pieces. The first push will show whether Linux x86 agrees within 1e-10; any difference would come from last-bit float noise in the Qiskit and numpy products.
+- **`pip install` in CI uses exact pins but no hashes** (`--require-hashes` is not used), so it trusts PyPI to serve the pinned versions.
+- **The CI check is now by value, so a hand edit to a fixture smaller than 1e-10 would pass `compare:fixtures`.** `check:fixtures` still catches any byte change, unless `MANIFEST.json` is edited along with it. The permission rule and review are the other protections. This narrows the M0 known limit; it does not close it.
+- **The Python generator has no unit tests of its own.** It is checked through its self-check, the coverage check, the golden test and the CI comparison.
+
+### Skipped or uncertain
+
+- No player-facing text and no physics statements were written, so nothing is marked `TODO(physics-review)`.
+- The M0 review findings listed under Known limits in M0 are unchanged.

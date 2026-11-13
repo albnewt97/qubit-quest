@@ -1,0 +1,11 @@
+# Exact versions for the fixture generators in tools/fixtures: the full pip freeze
+# of a clean Python 3.11 venv after `pip install qiskit numpy`. The generators stop
+# unless these are installed exactly. Changing a pin can change the answer keys,
+# so regenerate with `pnpm fixtures` and commit both.
+dill==0.4.1
+numpy==2.4.6
+qiskit==2.6.2
+rustworkx==0.18.1
+scipy==1.17.1
+stevedore==5.10.0
+typing-extensions==4.16.0

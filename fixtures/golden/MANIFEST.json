@@ -1,0 +1,17 @@
+{
+  "files": {
+    "statevector.json": "8835cbbdac907452d18d1e8d1057989a061dd7cb2feccb204d2575f32fc300b3"
+  },
+  "meta": {
+    "generator": "tools/fixtures/generate.py",
+    "requirements": {
+      "dill": "0.4.1",
+      "numpy": "2.4.6",
+      "qiskit": "2.6.2",
+      "rustworkx": "0.18.1",
+      "scipy": "1.17.1",
+      "stevedore": "5.10.0",
+      "typing-extensions": "4.16.0"
+    }
+  }
+}
