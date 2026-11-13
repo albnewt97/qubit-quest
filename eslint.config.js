@@ -6,6 +6,7 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 import local from "./tools/lint/engine-imports.js";
+import testFiles from "./tools/test-files.json" with { type: "json" };
 
 // ---------------------------------------------------------------------------
 // Engine purity: src/engine is pure TypeScript. Imports only from inside
@@ -73,7 +74,9 @@ const testRestrictedGlobals = ["xit", "xtest", "xdescribe", "fit", "fdescribe"].
 }));
 
 const ENGINE_FILES = ["src/engine/**/*.{ts,tsx}"];
-const TEST_FILES = ["**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}", "e2e/**/*.{ts,tsx}"];
+// The unit-test pattern is shared with Vitest (vite.config.ts), so every file
+// linted as a test is also run. tools/test-files.test.ts checks it.
+const TEST_FILES = [testFiles.unitTests, `${testFiles.e2eDir}/**/*.{ts,tsx}`];
 
 export default defineConfig([
   globalIgnores(["dist", "coverage", "playwright-report", "test-results"]),

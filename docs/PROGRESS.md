@@ -78,6 +78,15 @@ Branch `m00-scaffold`.
 - Playwright runs Chromium only. The three-browser runs arrive in M14.
 - Not yet pushed, so CI has not run on GitHub.
 - The `fixtures/golden` deny rule covers Claude Code's file tools, Bash redirects and the file commands Claude Code recognises (`sed`, `tee` …). It does not cover a script that writes files itself, such as `node -e` or `python3 -c`. So until the CI regeneration job exists (M1), a shell write can get past it. `check:fixtures` catches an edit only if `MANIFEST.json` is not updated along with it.
+- **Open findings from the second review (of `fd2fb1d`), recorded and not fixed.** Line numbers are as of `fd2fb1d`. Its findings 2 (test files linted but never run) and 5 (uncommitted BUILD_PLAN.md edits) were closed in the final fix-up below.
+  1. **Medium: the lint ban on skipped tests misses some forms.** The selector matches only objects literally named `describe`, `suite`, `it`, `test` or `bench`, so these give no lint error: `ctx.skip()` inside a test, the destructured `({ skip }) => skip()`, a renamed import (`import { it as check } from "vitest"; check.skip(…)`), Playwright's fixture pattern (`const t = base.extend({}); t.skip(…)`), and `it.fails(…)`, which inverts a test. No test covers these forms. *Partly mitigated by the final fix-up:* in unit tests, the first three are now caught at run time, because `pnpm test` fails on any skipped test. Still not caught: any skip in `e2e` (`pnpm test:e2e` has no such check), and `it.fails`, which reports as passed.
+  2. **Medium: not every permission rule was tried live.** M0 item 6 asks for each rule to be confirmed by attempting the denied action. Only `Edit(/fixtures/golden/**)`, `--no-verify` and `-n` have a recorded attempt. Not confirmed: `Edit(/.githooks/**)`, `-nm`, `-an`, `git -c *` and `git config *core.hooksPath*`. (The first review reports that its own `git config core.hooksPath` command was refused, but that was incidental, not a recorded check.) Gaps in the rules themselves (`.claude/settings.json`): `git commit -nq -m x` and `git commit -na -m x` match no pattern, and neither do abbreviations such as `--no-veri`, which git accepts. Nothing denies edits to `.claude/settings.json` itself, and whether Claude Code protects that file by default has not been checked. The acceptance row "Commits that skip hooks are denied to Claude Code" reads as if `-n` were fully covered; it is not.
+  3. **Low: two engine-purity gaps.** `globalThis.Math.random()` passes lint and `tsc` (inconsistent with `globalThis.Date`, which is banned), and so does `new Intl.DateTimeFormat().format()`, which reads the clock. No test covers either.
+  4. **Low: branches with no test.**
+     - `src/engine/rng.ts`: the boundary seeds 0 and 2^32 − 1 (accepted at line 35); `fork("")`; the mean and range of a forked stream (only the root stream is checked); whether a forked stream can equal some root seed's stream.
+     - `tools/lint/engine-imports.js` (the review's probe showed each works, but no repo test covers it): the non-literal import message (lines 86–93), `import x = require(…)` (lines 130–134), the `/x` absolute-path branch (line 35), and stripping `?query` plus the bare `src`, `.` and `..` specifiers (lines 31–36).
+     - `tools/validate-levels/index.ts` lines 16–22: the failure path ("a level can never ship before the validator does").
+  5. **Nit:** the CI step name in `.github/workflows/ci.yml` (line 25) does not mention the fixture check, though `pnpm verify` runs it.
 
 ### Skipped or uncertain
 
@@ -136,3 +145,41 @@ Branch `m00-scaffold`. No changes to `rng.ts`.
 - `tools/fixtures` must write `fixtures/golden/MANIFEST.json` whenever it writes fixtures, or `check:fixtures` fails.
 - Add the CI job that runs the deterministic generators and fails on any difference.
 - Engine tests load answer keys with a plain JSON import (`resolveJsonModule`). Loading many files through `import.meta.glob` would need `vite/client` types in `tsconfig.engine.json`; ask before adding them.
+
+## M0 final fix-up (second review)
+
+Branch `m00-scaffold`. No changes to `rng.ts`. The remaining findings of the second review are under Known limits in M0 above.
+
+### What was done
+
+- **One shared test-file pattern.** `tools/test-files.json` holds `unitTests` (`**/*.{test,spec}.{ts,tsx}`) and `e2eDir` (`e2e`). `eslint.config.js` builds its test-file globs from it, and `vite.config.ts` uses `unitTests` as Vitest's only `include` and excludes `e2e/**`. Before this, Vitest ran only `src/**/*.test.{ts,tsx}` and `tools/**/*.test.ts`, so a `src/game/x.spec.ts` or a test outside `src` and `tools` was linted but never run.
+- **The unit-test step fails on tests that did not run.** The `test` script (the unit-test step of `verify`) adds the reporter `tools/vitest/no-skipped-reporter.ts`. After the run, it lists every test whose state is not passed or failed (skipped, todo, pending), and every skipped or pending suite, and sets exit code 1.
+- `docs/BUILD_PLAN.md`: the owner's edits are committed unchanged.
+
+### Acceptance checks
+
+| Check | Proved by |
+| ----- | --------- |
+| A `*.test.*` or `*.spec.*` file outside `e2e` that Vitest does not collect fails a test | `tools/test-files.test.ts`: "collects every tracked or untracked-but-not-gitignored \*.test.\* or \*.spec.\* file outside e2e". It lists files with `git ls-files --cached --others --exclude-standard`, asks Vitest itself (`vitest list --filesOnly --json` in a child process) what it collects, and requires every candidate to be collected. |
+| Vitest collects every file lint treats as a unit test | Both configs read `tools/test-files.json`; the test above checks the result on the real repository. |
+| The unit-test step fails on any skipped, todo or pending test | `tools/vitest/no-skipped-reporter.test.ts` reads the real `test` script from `package.json` and runs its arguments in a child Vitest on a throwaway folder in the OS temp directory. It must exit non-zero, naming the test, for `it.skip`, `test.skip`, `it.todo`, `describe.skip`, `describe.todo`, `it.skipIf(true)`, `it.runIf(false)`, `ctx.skip()`, destructured `skip()` and `it.only` leaving another test unrun. Controls: all-passing exits 0, and a failing test still fails. |
+| `pnpm verify` and `pnpm test:e2e` pass | Run in the session: `verify` exit 0 (236 unit tests), `test:e2e` 1 passed. |
+
+### Shown in the session
+
+- **Tests first:** both new test files were run before the implementation. All 10 skip cases failed (the child run exited 0), and the two controls passed. The coverage test first failed because `tools/test-files.json` did not exist yet. With only that file added, it failed for the intended reason: a temporary `src/game/probe.spec.ts` was reported as not collected.
+- After the change, `probe.spec.ts` was collected. A temporary `src/game/probe.test.js`, which the shared pattern does not cover, made the coverage test fail. Both probes were then deleted.
+- **verify, end to end:** a temporary `src/game/deliberate-runtime-skip.test.ts` using `ctx.skip()` passed typecheck and lint (lint cannot see it; see Known limits), and then `pnpm verify` exited 1 at the unit-test step: "no-skipped-reporter: 1 test(s) or suite(s) did not run …". The file was then deleted.
+
+### Decisions
+
+- **The shared pattern is a JSON file**, because `eslint.config.js` is plain JS and `vite.config.ts` is typechecked TypeScript. A JSON import works in both without adding `allowJs` or a declaration file.
+- **The shared pattern covers `.ts` and `.tsx` only**, the same as lint's test rules before. A test file with another extension (`.test.js`, `.test.mts` …) is not collected, and the coverage test fails on it. Widening the pattern would also mean giving those files the engine and test lint rules, which was out of scope.
+- **The coverage test also includes untracked files that are not gitignored**, like the "lints every source file" test, so a new test file fails before it is staged. It skips files listed in the index but deleted from the working tree.
+- **The no-skip reporter is wired into the `test` script, not into `vite.config.ts`.** `verify` and CI run `pnpm test`, so they get it. An ad-hoc `pnpm vitest run file` or `-t name` does not, so filtering by name (which marks the other tests skipped) still works while developing.
+- The probe runs in the reporter test drop `CI`, `TEST` and `VITEST*` from the child's environment, so `.only` behaves the same locally and in CI. (In CI, Vitest itself also rejects `.only`.)
+
+### Skipped or uncertain
+
+- A Vitest snapshot file (`__snapshots__/x.test.ts.snap`) matches `*.test.*` and is not a test file, so the coverage test would flag it. No snapshots exist. If they are adopted, the test needs an exemption for `__snapshots__`, which needs the owner's approval.
+- Skipped Playwright tests are not caught at run time (see Known limits).

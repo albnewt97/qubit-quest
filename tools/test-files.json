@@ -1,0 +1,4 @@
+{
+  "unitTests": "**/*.{test,spec}.{ts,tsx}",
+  "e2eDir": "e2e"
+}

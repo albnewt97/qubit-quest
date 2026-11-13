@@ -16,7 +16,7 @@
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run",
+    "test": "vitest run --reporter=default --reporter=./tools/vitest/no-skipped-reporter.ts",
     "test:e2e": "playwright test",
     "validate:levels": "tsx tools/validate-levels/index.ts",
     "fixtures": "python3 tools/fixtures/generate.py",
