@@ -21,6 +21,7 @@
     "validate:levels": "tsx tools/validate-levels/index.ts",
     "fixtures": "python3 tools/fixtures/generate.py",
     "check:fixtures": "tsx tools/check-fixtures/index.ts",
+    "compare:fixtures": "tsx tools/check-fixtures/compare-cli.ts",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm validate:levels && pnpm check:fixtures && pnpm build"
   },
   "dependencies": {
